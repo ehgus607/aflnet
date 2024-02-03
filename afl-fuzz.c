@@ -9085,6 +9085,9 @@ int main(int argc, char** argv) {
         }else if (!strcmp(optarg, "SNMP")) {
           extract_requests = &extract_requests_SNMP;
           extract_response_codes = &extract_response_codes_SNMP;
+        }else if (!strcmp(optarg, "RTPS")) {
+          extract_requests = &extract_requests_rtps;
+          extract_response_codes = &extract_response_codes_rtps;
         } else {
           FATAL("%s protocol is not supported yet!", optarg);
         }

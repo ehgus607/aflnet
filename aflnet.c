@@ -13,6 +13,74 @@
 
 // Protocol-specific functions for extracting requests and responses
 
+
+region_t* extract_requests_rtps(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref)
+{
+  char *mem;
+  unsigned int mem_count = 0;
+  unsigned int mem_size = 1024;
+  unsigned int region_count = 0;
+  region_t *regions = NULL;
+  char terminator[2] = {0x00, 0x00};
+  char magic[4] = {0x52,0x54,0x50,0x53};
+  char vendor[4] = {0x80,0x01,0x38,0x00};
+  //char* terminator = '\0';
+  mem = (char *)ck_alloc(mem_size);
+
+  unsigned int cur_start = 0;
+  unsigned int cur_end = 0;
+
+  for (unsigned int byte_count = 0; byte_count < buf_size; byte_count++) {
+    memcpy(&mem[mem_count], buf + byte_count, 1);
+
+     if (memcmp(&buf[cur_end+1], magic, 4) == 0){
+        region_count++;
+
+        regions = (region_t *)ck_realloc(regions, region_count * sizeof(region_t));
+        regions[region_count - 1].start_byte = cur_start;
+        regions[region_count - 1].end_byte = cur_end;
+        regions[region_count - 1].state_sequence = NULL;
+        regions[region_count - 1].state_count = 0;
+
+        mem_count = 0;
+        cur_start = cur_end +1 ;
+        cur_end = cur_start;
+    }
+    else {
+      mem_count++;
+      cur_end++;
+      //Check if the last byte has been reached
+      if (cur_end == buf_size - 1) {
+        break;
+      }
+      if (mem_count == mem_size) {
+
+        //enlarge the mem buffer
+        mem_size = mem_size * 2;
+        mem=(char *)ck_realloc(mem, mem_size);
+      }
+    }
+    //ACTF("End of iteration");
+  }
+  if (mem) ck_free(mem);
+  //in case region_count equals zero, it means that the structure of the buffer is broken
+  //hence we create one region for the whole buffer
+  if ((region_count == 0) && (buf_size > 0)) {
+    regions = (region_t *)ck_realloc(regions, sizeof(region_t));
+    regions[0].start_byte = 0;
+    regions[0].end_byte = buf_size - 1;
+    regions[0].state_sequence = NULL;
+    regions[0].state_count = 0;
+
+    region_count = 1;
+  }
+
+  *region_count_ref = region_count;
+  return regions;
+}
+
+
+
 region_t* extract_requests_tftp(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref)
 {
   char *mem;
@@ -1178,16 +1246,18 @@ region_t* extract_requests_ipp(unsigned char* buf, unsigned int buf_size, unsign
   *region_count_ref = region_count;
   return regions;
 }
-unsigned int* extract_response_codes_tftp(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref)
-{
+
+unsigned int* extract_response_codes_rtps(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref){
   char *mem;
   unsigned int byte_count = 0;
   unsigned int mem_count = 0;
   unsigned int mem_size = 1024;
   unsigned int *state_sequence = NULL;
   unsigned int state_count = 0;
-  char terminator_one[1] = {0x00};
-  char terminator_two[1] = {0x03};
+  char terminator_one[1] = {0x02};
+  char terminator_two[1] = {0x04};
+  char terminator_three[1] = {0x05};
+  char terminator_four[1] = {0x06};
 
   mem=(char *)ck_alloc(mem_size);
 
@@ -1198,8 +1268,71 @@ unsigned int* extract_response_codes_tftp(unsigned char* buf, unsigned int buf_s
   while (byte_count < buf_size) {
     memcpy(&mem[mem_count], buf + byte_count++, 1);
 
-    if ((mem_count > 0) && ((memcmp(&mem[mem_count - 1], terminator_one, 1) == 0) || (memcmp(&mem[mem_count - 1], terminator_two, 1) == 0))) {
-      //Extract the response code which is the first 4 bytes
+    if ((mem_count > 240) && (((memcmp(&mem[mem_count - 1], terminator_one, 1) == 0) || (memcmp(&mem[mem_count - 1], terminator_two, 1) == 0))||
+     (memcmp(&mem[mem_count - 1], terminator_three, 1) == 0) || (memcmp(&mem[mem_count - 1], terminator_four, 1) == 0))) {
+      //Extract the response code which is the at the offset 240, which indicates the option field
+      char temp[5];
+      memcpy(temp, mem, 5);
+      temp[4] = 0x0;
+      unsigned int message_code = (unsigned int) atoi(temp);
+
+      if (message_code == 0) break;
+
+      state_count++;
+      state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+      state_sequence[state_count - 1] = message_code;
+      mem_count = 0;
+    } else if (byte_count == buf_size){
+      char temp[5];
+      memcpy(temp, mem, 5);
+      temp[4] = 0x0;
+      unsigned int message_code = (unsigned int) atoi(temp);
+      if (message_code == 0) break;
+      state_count++;
+      state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+      state_sequence[state_count - 1] = message_code;
+      //mem_count = 0;
+      break;
+    }else{
+      mem_count++;
+      if (mem_count == mem_size) {
+        //enlarge the mem buffer
+        mem_size = mem_size * 2;
+        mem=(char *)ck_realloc(mem, mem_size);
+      }
+    }
+  }
+  if (mem) ck_free(mem);
+  *state_count_ref = state_count;
+  return state_sequence;
+}
+
+
+unsigned int* extract_response_codes_tftp(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref)
+{
+  char *mem;
+  unsigned int byte_count = 0;
+  unsigned int mem_count = 0;
+  unsigned int mem_size = 1024;
+  unsigned int *state_sequence = NULL;
+  unsigned int state_count = 0;
+  char terminator_one[1] = {0x02};
+  char terminator_two[1] = {0x04};
+  char terminator_three[1] = {0x05};
+  char terminator_four[1] = {0x06};
+
+  mem=(char *)ck_alloc(mem_size);
+
+  state_count++;
+  state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+  state_sequence[state_count - 1] = 0;
+
+  while (byte_count < buf_size) {
+    memcpy(&mem[mem_count], buf + byte_count++, 1);
+
+    if ((mem_count > 240) && (((memcmp(&mem[mem_count - 1], terminator_one, 1) == 0) || (memcmp(&mem[mem_count - 1], terminator_two, 1) == 0))||
+     (memcmp(&mem[mem_count - 1], terminator_three, 1) == 0) || (memcmp(&mem[mem_count - 1], terminator_four, 1) == 0))) {
+      //Extract the response code which is the at the offset 240, which indicates the option field
       char temp[5];
       memcpy(temp, mem, 5);
       temp[4] = 0x0;
