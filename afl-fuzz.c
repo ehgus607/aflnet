@@ -2973,7 +2973,7 @@ EXP_ST void init_forkserver(char** argv) {
                            "abort_on_error=1:"
                            "allocator_may_return_null=1:"
                            "msan_track_origins=0", 0);
-
+    
     execv(target_path, argv);
 
     /* Use a distinctive bitmap signature to tell the parent about execv()
@@ -3241,7 +3241,7 @@ static u8 run_target(char** argv, u32 timeout) {
       setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
                              "symbolize=0:"
                              "msan_track_origins=0", 0);
-
+  
       execv(target_path, argv);
 
       /* Use a distinctive bitmap value to tell the parent about execv()
@@ -3416,6 +3416,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
   if (dumb_mode != 1 && !no_forkserver && !forksrv_pid)
     init_forkserver(argv);
+    
 
   if (q->exec_cksum) memcpy(first_trace, trace_bits, MAP_SIZE);
 
@@ -3987,7 +3988,8 @@ static void write_crash_readme(void) {
    entry is saved, 0 otherwise. */
 
 static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
-
+  char *rtps_seed = malloc(20);
+  sprintf(rtps_seed, "%ld", time(NULL));
   u8  *fn = "";
   u8  hnb;
   //s32 fd;
@@ -4035,7 +4037,9 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
+       
 
+    argv[1] = rtps_seed;
     res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
 
     if (res == FAULT_ERROR)
@@ -4143,8 +4147,8 @@ keep_as_crash:
 
 #ifndef SIMPLE_FILES
 
-      fn = alloc_printf("%s/replayable-crashes/id:%06llu,sig:%02u,%s", out_dir,
-                        unique_crashes, kill_signal, describe_op(0));
+      fn = alloc_printf("%s/replayable-crashes/id:%06llu,sig:%02u,%s,%s", out_dir,
+                        unique_crashes, kill_signal, rtps_seed ,describe_op(0));
 
 #else
 
@@ -4177,7 +4181,7 @@ keep_as_crash:
   close(fd);*/
 
   ck_free(fn);
-
+  free(rtps_seed);
   return keeping;
 
 }
