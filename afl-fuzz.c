@@ -3553,6 +3553,9 @@ static void check_map_coverage(void) {
 
 static void perform_dry_run(char** argv) {
 
+  char *rtps_seed = malloc(20);
+  sprintf(rtps_seed, "%ld", time(NULL));
+
   struct queue_entry* q = queue;
   u32 cal_failures = 0;
   u8* skip_crashes = getenv("AFL_SKIP_CRASHES");
@@ -3581,7 +3584,8 @@ static void perform_dry_run(char** argv) {
 
     /* AFLNet construct the kl_messages linked list for this queue entry*/
     kl_messages = construct_kl_messages(q->fname, q->regions, q->region_count);
-
+    
+    argv[1] = rtps_seed;
     res = calibrate_case(argv, q, use_mem, 0, 1);
     ck_free(use_mem);
 
@@ -3763,7 +3767,7 @@ static void perform_dry_run(char** argv) {
       WARNF(cLRD "High percentage of rejected test cases, check settings!");
 
   }
-
+  free(rtps_seed);
   OKF("All test cases processed.");
 
 }
