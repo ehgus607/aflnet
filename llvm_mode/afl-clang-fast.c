@@ -131,10 +131,10 @@ static void edit_params(u32 argc, char** argv) {
   cc_params[cc_par_cnt++] = "-mllvm";
   cc_params[cc_par_cnt++] = "-sanitizer-coverage-block-threshold=0";
 #else
-  cc_params[cc_par_cnt++] = "-Xclang";
-  cc_params[cc_par_cnt++] = "-load";
-  cc_params[cc_par_cnt++] = "-Xclang";
-  cc_params[cc_par_cnt++] = alloc_printf("%s/BlockTracer.so", obj_path);
+  // cc_params[cc_par_cnt++] = "-Xclang";
+  // cc_params[cc_par_cnt++] = "-load";
+  // cc_params[cc_par_cnt++] = "-Xclang";
+  // cc_params[cc_par_cnt++] = alloc_printf("%s/BlockTracer.so", obj_path);
   cc_params[cc_par_cnt++] = "-Xclang";
   cc_params[cc_par_cnt++] = "-load";
   cc_params[cc_par_cnt++] = "-Xclang";
