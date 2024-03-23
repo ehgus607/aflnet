@@ -3556,6 +3556,7 @@ static void perform_dry_run(char** argv) {
   char *rtps_seed = malloc(20);
   sprintf(rtps_seed, "%ld", time(NULL));
 
+
   struct queue_entry* q = queue;
   u32 cal_failures = 0;
   u8* skip_crashes = getenv("AFL_SKIP_CRASHES");
@@ -3584,8 +3585,10 @@ static void perform_dry_run(char** argv) {
 
     /* AFLNet construct the kl_messages linked list for this queue entry*/
     kl_messages = construct_kl_messages(q->fname, q->regions, q->region_count);
-    
-    argv[1] = rtps_seed;
+    argv[1] = '-s';
+    argv[2] = rtps_seed;
+    argv[3] = '-m';
+    argv[4] = 'topo';
     res = calibrate_case(argv, q, use_mem, 0, 1);
     ck_free(use_mem);
 
@@ -4041,9 +4044,10 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
-       
-
-    argv[1] = rtps_seed;
+    argv[1] = '-s';
+    argv[2] = rtps_seed;
+    argv[3] = '-m';
+    argv[4] = 'topo';
     res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
 
     if (res == FAULT_ERROR)
