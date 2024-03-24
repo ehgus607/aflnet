@@ -2973,7 +2973,7 @@ EXP_ST void init_forkserver(char** argv) {
                            "abort_on_error=1:"
                            "allocator_may_return_null=1:"
                            "msan_track_origins=0", 0);
-    
+    printf("%s\n", target_path);
     execv(target_path, argv);
 
     /* Use a distinctive bitmap signature to tell the parent about execv()
@@ -3138,7 +3138,6 @@ EXP_ST void init_forkserver(char** argv) {
          DMS(mem_limit << 20), mem_limit - 1);
 
   }
-
   FATAL("Fork server handshake failed");
 
 }
@@ -3148,7 +3147,6 @@ EXP_ST void init_forkserver(char** argv) {
    information. The called program will update trace_bits[]. */
 
 static u8 run_target(char** argv, u32 timeout) {
-
   static struct itimerval it;
   static u32 prev_timed_out = 0;
   static u64 exec_ms = 0;
@@ -3428,8 +3426,11 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
     if (!first_run && !(stage_cur % stats_update_freq)) show_stats();
 
-    write_to_testcase(use_mem, q->len);
-
+    // write_to_testcase(use_mem, q->len);
+    // argv[1]="-s";
+    // sprintf(argv[2], "%d", rand());
+    // argv[3]="-m";
+    // argv[4]="topo";
     fault = run_target(argv, use_tmout);
 
     /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
@@ -3552,11 +3553,6 @@ static void check_map_coverage(void) {
    expected. This is done only for the initial inputs, and only once. */
 
 static void perform_dry_run(char** argv) {
-
-  char *rtps_seed = malloc(20);
-  sprintf(rtps_seed, "%ld", time(NULL));
-
-
   struct queue_entry* q = queue;
   u32 cal_failures = 0;
   u8* skip_crashes = getenv("AFL_SKIP_CRASHES");
@@ -3585,10 +3581,6 @@ static void perform_dry_run(char** argv) {
 
     /* AFLNet construct the kl_messages linked list for this queue entry*/
     kl_messages = construct_kl_messages(q->fname, q->regions, q->region_count);
-    argv[1] = '-s';
-    argv[2] = rtps_seed;
-    argv[3] = '-m';
-    argv[4] = 'topo';
     res = calibrate_case(argv, q, use_mem, 0, 1);
     ck_free(use_mem);
 
@@ -3770,7 +3762,6 @@ static void perform_dry_run(char** argv) {
       WARNF(cLRD "High percentage of rejected test cases, check settings!");
 
   }
-  free(rtps_seed);
   OKF("All test cases processed.");
 
 }
@@ -3995,8 +3986,6 @@ static void write_crash_readme(void) {
    entry is saved, 0 otherwise. */
 
 static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
-  char *rtps_seed = malloc(20);
-  sprintf(rtps_seed, "%ld", time(NULL));
   u8  *fn = "";
   u8  hnb;
   //s32 fd;
@@ -4044,10 +4033,6 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
-    argv[1] = '-s';
-    argv[2] = rtps_seed;
-    argv[3] = '-m';
-    argv[4] = 'topo';
     res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
 
     if (res == FAULT_ERROR)
@@ -4097,6 +4082,10 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
         u8 new_fault;
         write_to_testcase(mem, len);
+    //         argv[1]="-s";
+    // sprintf(argv[2], "%d", rand());
+    // argv[3]="-m";
+    // argv[4]="topo";
         new_fault = run_target(argv, hang_tmout);
 
         /* A corner case that one user reported bumping into: increasing the
@@ -4111,8 +4100,8 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
 #ifndef SIMPLE_FILES
 
-      fn = alloc_printf("%s/replayable-hangs/id:%06llu,%s", out_dir,
-                        unique_hangs, describe_op(0));
+      fn = alloc_printf("%s/replayable-hangs/id:%06llu;seed:%s;%s", out_dir,
+                        unique_hangs, argv[2], describe_op(0));
 
 #else
 
@@ -4155,8 +4144,8 @@ keep_as_crash:
 
 #ifndef SIMPLE_FILES
 
-      fn = alloc_printf("%s/replayable-crashes/id:%06llu,sig:%02u,%s,%s", out_dir,
-                        unique_crashes, kill_signal, rtps_seed ,describe_op(0));
+      fn = alloc_printf("%s/replayable-crashes/id:%06llu,sig:%02u,%s,seed:%s,%s", out_dir,
+                        unique_crashes, kill_signal,argv[2], describe_op(0));
 
 #else
 
@@ -4189,7 +4178,6 @@ keep_as_crash:
   close(fd);*/
 
   ck_free(fn);
-  free(rtps_seed);
   return keeping;
 
 }
@@ -5492,6 +5480,10 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
   } while(cur_it != M2_next);
 
   /* End of AFLNet code */
+    //   argv[1]="-s";
+    // sprintf(argv[2], "%d", rand());
+    // argv[3]="-m";
+    // argv[4]="topo";
 
   fault = run_target(argv, exec_tmout);
 
@@ -7758,6 +7750,11 @@ static void sync_fuzzers(char** argv) {
         regions = (*extract_requests)(mem, st.st_size, &region_count);
         kl_messages = construct_kl_messages(path, regions, region_count);
 
+    //         argv[1]="-s";
+    // sprintf(argv[2], "%d", rand());
+    // argv[3]="-m";
+    // argv[4]="topo";
+
         fault = run_target(argv, exec_tmout);
 
         if (stop_soon) return;
@@ -9334,9 +9331,7 @@ int main(int argc, char** argv) {
 
   } else {
     while (1) {
-
       u8 skipped_fuzz;
-
       cull_queue();
 
       if (!queue_cur) {
