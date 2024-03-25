@@ -3426,11 +3426,9 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
     if (!first_run && !(stage_cur % stats_update_freq)) show_stats();
 
-    // write_to_testcase(use_mem, q->len);
-    // argv[1]="-s";
-    // sprintf(argv[2], "%d", rand());
-    // argv[3]="-m";
-    // argv[4]="topo";
+    write_to_testcase(use_mem, q->len);
+    sprintf(argv[2], "%d", rand());
+
     fault = run_target(argv, use_tmout);
 
     /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
@@ -4082,10 +4080,9 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
         u8 new_fault;
         write_to_testcase(mem, len);
-    //         argv[1]="-s";
-    // sprintf(argv[2], "%d", rand());
-    // argv[3]="-m";
-    // argv[4]="topo";
+
+    sprintf(argv[2], "%d", rand());
+
         new_fault = run_target(argv, hang_tmout);
 
         /* A corner case that one user reported bumping into: increasing the
@@ -4144,7 +4141,7 @@ keep_as_crash:
 
 #ifndef SIMPLE_FILES
 
-      fn = alloc_printf("%s/replayable-crashes/id:%06llu,sig:%02u,%s,seed:%s,%s", out_dir,
+      fn = alloc_printf("%s/replayable-crashes/id:%06llu,sig:%02u,seed:%s,%s", out_dir,
                         unique_crashes, kill_signal,argv[2], describe_op(0));
 
 #else
@@ -5480,10 +5477,9 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
   } while(cur_it != M2_next);
 
   /* End of AFLNet code */
-    //   argv[1]="-s";
-    // sprintf(argv[2], "%d", rand());
-    // argv[3]="-m";
-    // argv[4]="topo";
+
+    sprintf(argv[2], "%d", rand());
+
 
   fault = run_target(argv, exec_tmout);
 
@@ -7750,10 +7746,7 @@ static void sync_fuzzers(char** argv) {
         regions = (*extract_requests)(mem, st.st_size, &region_count);
         kl_messages = construct_kl_messages(path, regions, region_count);
 
-    //         argv[1]="-s";
-    // sprintf(argv[2], "%d", rand());
-    // argv[3]="-m";
-    // argv[4]="topo";
+        sprintf(argv[2], "%d", rand());
 
         fault = run_target(argv, exec_tmout);
 
