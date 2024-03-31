@@ -3427,7 +3427,6 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
     if (!first_run && !(stage_cur % stats_update_freq)) show_stats();
 
     write_to_testcase(use_mem, q->len);
-    sprintf(argv[2], "%d", rand());
 
     fault = run_target(argv, use_tmout);
 
@@ -4080,8 +4079,6 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
         u8 new_fault;
         write_to_testcase(mem, len);
-
-    sprintf(argv[2], "%d", rand());
 
         new_fault = run_target(argv, hang_tmout);
 
@@ -5478,7 +5475,6 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   /* End of AFLNet code */
 
-    sprintf(argv[2], "%d", rand());
 
 
   fault = run_target(argv, exec_tmout);
@@ -5824,6 +5820,7 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
    skipped or bailed out. */
 
+
 static u8 fuzz_one(char** argv) {
 
   s32 len, fd, temp_len, i, j;
@@ -6046,7 +6043,7 @@ AFLNET_REGIONS_SELECTION:;
     stage_cur_byte = stage_cur >> 3;
 
     FLIP_BIT(out_buf, stage_cur);
-
+    sprintf(argv[2], "%d", rand());
     if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
 
     FLIP_BIT(out_buf, stage_cur);
@@ -6139,7 +6136,7 @@ AFLNET_REGIONS_SELECTION:;
 
     FLIP_BIT(out_buf, stage_cur);
     FLIP_BIT(out_buf, stage_cur + 1);
-
+    sprintf(argv[2], "%d", rand());
     if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
 
     FLIP_BIT(out_buf, stage_cur);
@@ -6168,7 +6165,7 @@ AFLNET_REGIONS_SELECTION:;
     FLIP_BIT(out_buf, stage_cur + 1);
     FLIP_BIT(out_buf, stage_cur + 2);
     FLIP_BIT(out_buf, stage_cur + 3);
-
+    sprintf(argv[2], "%d", rand());
     if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
 
     FLIP_BIT(out_buf, stage_cur);
@@ -6220,7 +6217,7 @@ AFLNET_REGIONS_SELECTION:;
     stage_cur_byte = stage_cur;
 
     out_buf[stage_cur] ^= 0xFF;
-
+    sprintf(argv[2], "%d", rand());
     if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
 
     /* We also use this stage to pull off a simple trick: we identify
@@ -6298,7 +6295,7 @@ AFLNET_REGIONS_SELECTION:;
     stage_cur_byte = i;
 
     *(u16*)(out_buf + i) ^= 0xFFFF;
-
+    sprintf(argv[2], "%d", rand());
     if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
     stage_cur++;
 
@@ -6335,7 +6332,7 @@ AFLNET_REGIONS_SELECTION:;
     stage_cur_byte = i;
 
     *(u32*)(out_buf + i) ^= 0xFFFFFFFF;
-
+    sprintf(argv[2], "%d", rand());
     if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
     stage_cur++;
 
@@ -6391,7 +6388,7 @@ skip_bitflip:
 
         stage_cur_val = j;
         out_buf[i] = orig + j;
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6403,7 +6400,7 @@ skip_bitflip:
 
         stage_cur_val = -j;
         out_buf[i] = orig - j;
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6462,7 +6459,7 @@ skip_bitflip:
 
         stage_cur_val = j;
         *(u16*)(out_buf + i) = orig + j;
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6472,7 +6469,7 @@ skip_bitflip:
 
         stage_cur_val = -j;
         *(u16*)(out_buf + i) = orig - j;
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6487,7 +6484,7 @@ skip_bitflip:
 
         stage_cur_val = j;
         *(u16*)(out_buf + i) = SWAP16(SWAP16(orig) + j);
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6565,7 +6562,7 @@ skip_bitflip:
 
         stage_cur_val = -j;
         *(u32*)(out_buf + i) = orig - j;
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6579,7 +6576,7 @@ skip_bitflip:
 
         stage_cur_val = j;
         *(u32*)(out_buf + i) = SWAP32(SWAP32(orig) + j);
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6589,7 +6586,7 @@ skip_bitflip:
 
         stage_cur_val = -j;
         *(u32*)(out_buf + i) = SWAP32(SWAP32(orig) - j);
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6648,7 +6645,7 @@ skip_arith:
 
       stage_cur_val = interesting_8[j];
       out_buf[i] = interesting_8[j];
-
+      sprintf(argv[2], "%d", rand());
       if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
 
       out_buf[i] = orig;
@@ -6701,7 +6698,7 @@ skip_arith:
         stage_val_type = STAGE_VAL_LE;
 
         *(u16*)(out_buf + i) = interesting_16[j];
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6715,6 +6712,7 @@ skip_arith:
         stage_val_type = STAGE_VAL_BE;
 
         *(u16*)(out_buf + i) = SWAP16(interesting_16[j]);
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6770,7 +6768,7 @@ skip_arith:
         stage_val_type = STAGE_VAL_LE;
 
         *(u32*)(out_buf + i) = interesting_32[j];
-
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6784,6 +6782,7 @@ skip_arith:
         stage_val_type = STAGE_VAL_BE;
 
         *(u32*)(out_buf + i) = SWAP32(interesting_32[j]);
+        sprintf(argv[2], "%d", rand());
         if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
         stage_cur++;
 
@@ -6849,6 +6848,7 @@ skip_interest:
 
       last_len = extras[j].len;
       memcpy(out_buf + i, extras[j].data, last_len);
+      sprintf(argv[2], "%d", rand());
 
       if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
 
@@ -6893,6 +6893,7 @@ skip_interest:
 
       /* Copy tail */
       memcpy(ex_tmp + i + extras[j].len, out_buf + i, len - i);
+      sprintf(argv[2], "%d", rand());
 
       if (common_fuzz_stuff(argv, ex_tmp, len + extras[j].len)) {
         ck_free(ex_tmp);
@@ -6949,6 +6950,7 @@ skip_user_extras:
 
       last_len = a_extras[j].len;
       memcpy(out_buf + i, a_extras[j].data, last_len);
+      sprintf(argv[2], "%d", rand());
 
       if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
 
@@ -7475,6 +7477,7 @@ havoc_stage:
       }
 
     }
+    sprintf(argv[2], "%d", rand());
 
     if (common_fuzz_stuff(argv, out_buf, temp_len))
       goto abandon_entry;
@@ -7746,7 +7749,7 @@ static void sync_fuzzers(char** argv) {
         regions = (*extract_requests)(mem, st.st_size, &region_count);
         kl_messages = construct_kl_messages(path, regions, region_count);
 
-        sprintf(argv[2], "%d", rand());
+        
 
         fault = run_target(argv, exec_tmout);
 
