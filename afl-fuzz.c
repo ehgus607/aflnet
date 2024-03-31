@@ -5821,6 +5821,12 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
    skipped or bailed out. */
 
 
+void Qos_mutation(u8* bp){
+
+}
+
+
+int flag = 0;
 static u8 fuzz_one(char** argv) {
 
   s32 len, fd, temp_len, i, j;
@@ -5986,8 +5992,15 @@ AFLNET_REGIONS_SELECTION:;
 
   orig_in = in_buf;
 
+
+
   out_buf = ck_alloc_nozero(in_buf_size);
   memcpy(out_buf, in_buf, in_buf_size);
+  if(flag==0){
+    FILE *fp = fopen("/tmp/fuzz_debug.txt","a");
+    fwrite(out_buf, 1, in_buf_size, fp);
+    flag=1;
+  }
 
   //Update len to keep the correct size of the buffer being mutated
   len = in_buf_size;
