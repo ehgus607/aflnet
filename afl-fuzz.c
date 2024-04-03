@@ -5821,12 +5821,111 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
    skipped or bailed out. */
 
 
-void Qos_mutation(u8* bp){
+void Qos_mutation(char* in, int size){
+  char *out = (char*)malloc(size);
+  memcpy(out, in, size);
+  int offset = 0;
+  offset+=20;
+  uint16_t NextHeader = 0;
+  char INFO_DST;
+  INFO_DST = out[offset];
+  if(INFO_DST != 0x0e){
+    return;
+  }
+  offset+=2;
+  memcpy(&NextHeader, out+offset, 2);
+  offset+=2;
+  offset+=NextHeader;
 
+
+  char INFO_TS;
+  INFO_DST = out[offset];
+  if(INFO_TS != 0x09){
+    return;
+  }
+  offset+=2;
+  memcpy(&NextHeader, out+offset, 2);
+  offset+=2;
+  offset+=NextHeader;
+
+
+  char DATA;
+  DATA = out[offset];
+  if(DATA != 0x15){
+    return;
+  }
+  offset+=28;
+  uint16_t parameterId;
+  uint16_t parameterLength;
+
+  while(1){
+    memcpy(&parameterId, out+offset, 2);
+    offset+=2;
+    if(parameterId == 0x0001){
+      break;
+    }
+
+    memcpy(&parameterLength, out+offset, 2);
+    offset+=2;
+
+    if(parameterId == 0x001d){
+      int32_t Durability_kind = rand()%4;
+      memcpy(out+offset, &Durability_kind, parameterLength);
+    } else if(parameterId == 0x001e){
+      int32_t sec = rand();
+      int32_t frac = rand();
+      int32_t history_kind = rand()%2;
+      int32_t history_depth = rand();
+      int32_t max_samples = rand();
+      int32_t max_instances = rand();
+      int32_t max_samples_per_instance = rand();
+      memcpy(out+offset, &sec, 4);
+      memcpy(out+offset+4, &frac, 4);
+      memcpy(out+offset+8, &history_kind, 4);
+      memcpy(out+offset+12, &history_depth, 4);
+      memcpy(out+offset+16, &max_samples, 4);
+      memcpy(out+offset+20, &max_instances, 4);
+      memcpy(out+offset+24, &max_samples_per_instance, 4);
+    } else if(parameterId == 0x0023){
+      int64_t Lifetime = rand();
+      memcpy(out+offset, &Lifetime, parameterLength);
+    } else if(parameterId == 0x0027){
+      int64_t Priority = rand();
+      memcpy(out+offset, &Priority, parameterLength);
+    } else if(parameterId == 0x001b){
+      int32_t kind = rand() % 2;
+      int32_t sec = rand();
+      int32_t frac = rand();
+      memcpy(out+offset, &kind, 4);
+      memcpy(out+offset+4, &sec, 4);
+      memcpy(out+offset+8, &frac, 4); 
+    } else if(parameterId == 0x001a){
+      int64_t Reliableity_kind = rand()%2;
+      int32_t pad = 0;
+      memcpy(out+offset, &Reliableity_kind, 8);
+      memcpy(out+offset+8, &pad, 4);
+    } else if(parameterId == 0x002b){
+      int64_t Deadline = rand();
+      memcpy(out+offset, &Deadline, parameterLength);
+    } else if(parameterId == 0x0004){
+      int64_t time_based_filter = rand();
+      memcpy(out+offset, &time_based_filter, parameterLength);
+    } else if(parameterId == 0x001f){
+      int32_t Ownership_kind = rand()%2;
+      memcpy(out+offset, &Ownership_kind, parameterLength);
+    } else if(parameterId == 0x0025){
+      int32_t destination_order = rand()%2;
+      memcpy(out+offset, &destination_order, parameterLength);
+    } else if(parameterId == 0x0021){
+      int64_t presentation = rand();
+      memcpy(out+offset, &presentation, parameterLength);
+    }
+    offset+=parameterLength;
+  }
+  memcpy(in, out, size);
+  return;
 }
 
-
-int flag = 0;
 static u8 fuzz_one(char** argv) {
 
   s32 len, fd, temp_len, i, j;
@@ -5952,6 +6051,7 @@ AFLNET_REGIONS_SELECTION:;
     if (M2_region_count == 0) M2_region_count++; //Mutate one region at least
   }
 
+
   /* Construct the kl_messages linked list and identify boundary pointers (M2_prev and M2_next) */
   kl_messages = construct_kl_messages(queue_cur->fname, queue_cur->regions, queue_cur->region_count);
 
@@ -5984,8 +6084,8 @@ AFLNET_REGIONS_SELECTION:;
     in_buf = (u8 *) ck_realloc (in_buf, in_buf_size + kl_val(it)->msize);
     if (!in_buf) PFATAL("AFLNet cannot allocate memory for in_buf");
     //Retrieve data from kl_messages to populate the in_buf
+    Qos_mutation(kl_val(it)->mdata, kl_val(it)->msize);
     memcpy(&in_buf[in_buf_size], kl_val(it)->mdata, kl_val(it)->msize);
-
     in_buf_size += kl_val(it)->msize;
     it = kl_next(it);
   }
@@ -5996,11 +6096,6 @@ AFLNET_REGIONS_SELECTION:;
 
   out_buf = ck_alloc_nozero(in_buf_size);
   memcpy(out_buf, in_buf, in_buf_size);
-  if(flag==0){
-    FILE *fp = fopen("/tmp/fuzz_debug.txt","a");
-    fwrite(out_buf, 1, in_buf_size, fp);
-    flag=1;
-  }
 
   //Update len to keep the correct size of the buffer being mutated
   len = in_buf_size;
