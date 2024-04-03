@@ -5923,6 +5923,7 @@ void Qos_mutation(char* in, int size){
     offset+=parameterLength;
   }
   memcpy(in, out, size);
+  free(out);
   return;
 }
 
