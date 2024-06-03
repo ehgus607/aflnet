@@ -412,10 +412,10 @@ kliter_t(lms) *M2_prev, *M2_next;
 unsigned int* (*extract_response_codes)(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref) = NULL;
 region_t* (*extract_requests)(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) = NULL;
 
-
-u8* fastdds;
-u8* cyclonedds;
-u8* opendds;
+char** fastdds_argv;
+char** cyclonedds_argv;
+char** opendds_argv;
+char* dds_seed;
 int dds_mode = 0;
 
 /* Initialize the implemented state machine as a graphviz graph */
@@ -1039,6 +1039,430 @@ int send_over_network()
 
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_port = htons(net_port);
+  serv_addr.sin_addr.s_addr = inet_addr(net_ip);
+
+  //This piece of code is only used for targets that send responses to a specific port number
+  //The Kamailio SIP server is an example. After running this code, the intialized sockfd 
+  //will be bound to the given local port
+  if(local_port > 0) {
+    local_serv_addr.sin_family = AF_INET;
+    local_serv_addr.sin_addr.s_addr = INADDR_ANY;
+    local_serv_addr.sin_port = htons(local_port);
+
+    local_serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    if (bind(sockfd, (struct sockaddr*) &local_serv_addr, sizeof(struct sockaddr_in)))  {
+      FATAL("Unable to bind socket on local source port");
+    }
+  }
+
+  if(connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+    //If it cannot connect to the server under test
+    //try it again as the server initial startup time is varied
+    for (n=0; n < 1000; n++) {
+      if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) break;
+      usleep(1000);
+    }
+    if (n== 1000) {
+      close(sockfd);
+      return 1;
+    }
+  }
+
+  //retrieve early server response if needed
+  if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) goto HANDLE_RESPONSES;
+      
+  //write the request messages
+  kliter_t(lms) *it;
+  messages_sent = 0;
+
+  for (it = kl_begin(kl_messages); it != kl_end(kl_messages); it = kl_next(it)) {
+    n = net_send(sockfd, timeout, kl_val(it)->mdata, kl_val(it)->msize);
+    messages_sent++;
+
+    //Allocate memory to store new accumulated response buffer size
+    response_bytes = (u32 *) ck_realloc(response_bytes, messages_sent * sizeof(u32));
+
+    //Jump out if something wrong leading to incomplete message sent
+    if (n != kl_val(it)->msize) {
+      goto HANDLE_RESPONSES;
+    }
+
+    //retrieve server response
+    u32 prev_buf_size = response_buf_size;
+    if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) {
+      goto HANDLE_RESPONSES;
+    }
+
+    //Update accumulated response buffer size
+    response_bytes[messages_sent - 1] = response_buf_size;
+
+    //set likely_buggy flag if AFLNet does not receive any feedback from the server
+    //it could be a signal of a potentiall server crash, like the case of CVE-2019-7314
+    if (prev_buf_size == response_buf_size) likely_buggy = 1;
+    else likely_buggy = 0;
+  }
+
+HANDLE_RESPONSES:
+  net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size);
+
+  if (messages_sent > 0 && response_bytes != NULL) {
+    response_bytes[messages_sent - 1] = response_buf_size;
+  }
+
+  //wait a bit letting the server to complete its remaining task(s)
+  memset(session_virgin_bits, 255, MAP_SIZE);
+  while(1) {
+    if (has_new_bits(session_virgin_bits) != 2) break;
+
+  }
+
+  close(sockfd);
+
+  if (likely_buggy && false_negative_reduction) return 0;
+
+  if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
+
+  //give the server a bit more time to gracefully terminate
+  while(1) {
+    int status = kill(child_pid, SIGTERM);
+    if ((status != 0) && (errno == ESRCH)) break;
+    if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
+  }
+
+  return 0;
+}
+
+int send_over_network_fastdds()
+{
+  int n;
+  u8 likely_buggy = 0;
+  struct sockaddr_in serv_addr;
+  struct sockaddr_in local_serv_addr;
+
+  //Clean up the server if needed
+  if (cleanup_script) system(cleanup_script);
+
+  //Wait a bit for the server initialization
+  usleep(server_wait_usecs);
+
+  //Clear the response buffer and reset the response buffer size
+  if (response_buf) {
+    ck_free(response_buf);
+    response_buf = NULL;
+    response_buf_size = 0;
+  }
+
+  if (response_bytes) {
+    ck_free(response_bytes);
+    response_bytes = NULL;
+  }
+
+  //Create a TCP/UDP socket
+  int sockfd = -1;
+  if (net_protocol == PRO_TCP)
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  else if (net_protocol == PRO_UDP)
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+  if (sockfd < 0) {
+    PFATAL("Cannot create a socket");
+  }
+
+  //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
+  //if the server is still alive after processing all the requests
+  struct timeval timeout;
+  timeout.tv_sec = 0;
+  timeout.tv_usec = socket_timeout_usecs;
+  setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+
+  memset(&serv_addr, '0', sizeof(serv_addr));
+
+
+
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_port = htons(7400);
+  serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+  //This piece of code is only used for targets that send responses to a specific port number
+  //The Kamailio SIP server is an example. After running this code, the intialized sockfd 
+  //will be bound to the given local port
+  if(local_port > 0) {
+    local_serv_addr.sin_family = AF_INET;
+    local_serv_addr.sin_addr.s_addr = INADDR_ANY;
+    local_serv_addr.sin_port = htons(local_port);
+
+    local_serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    if (bind(sockfd, (struct sockaddr*) &local_serv_addr, sizeof(struct sockaddr_in)))  {
+      FATAL("Unable to bind socket on local source port");
+    }
+  }
+
+  if(connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+    //If it cannot connect to the server under test
+    //try it again as the server initial startup time is varied
+    for (n=0; n < 1000; n++) {
+      if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) break;
+      usleep(1000);
+    }
+    if (n== 1000) {
+      close(sockfd);
+      return 1;
+    }
+  }
+
+  //retrieve early server response if needed
+  if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) goto HANDLE_RESPONSES;
+
+  //write the request messages
+  kliter_t(lms) *it;
+  messages_sent = 0;
+
+  for (it = kl_begin(kl_messages); it != kl_end(kl_messages); it = kl_next(it)) {
+    n = net_send(sockfd, timeout, kl_val(it)->mdata, kl_val(it)->msize);
+    messages_sent++;
+
+    //Allocate memory to store new accumulated response buffer size
+    response_bytes = (u32 *) ck_realloc(response_bytes, messages_sent * sizeof(u32));
+
+    //Jump out if something wrong leading to incomplete message sent
+    if (n != kl_val(it)->msize) {
+      goto HANDLE_RESPONSES;
+    }
+
+    //retrieve server response
+    u32 prev_buf_size = response_buf_size;
+    if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) {
+      goto HANDLE_RESPONSES;
+    }
+
+    //Update accumulated response buffer size
+    response_bytes[messages_sent - 1] = response_buf_size;
+
+    //set likely_buggy flag if AFLNet does not receive any feedback from the server
+    //it could be a signal of a potentiall server crash, like the case of CVE-2019-7314
+    if (prev_buf_size == response_buf_size) likely_buggy = 1;
+    else likely_buggy = 0;
+  }
+
+HANDLE_RESPONSES:
+
+  net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size);
+
+  if (messages_sent > 0 && response_bytes != NULL) {
+    response_bytes[messages_sent - 1] = response_buf_size;
+  }
+
+  //wait a bit letting the server to complete its remaining task(s)
+  memset(session_virgin_bits, 255, MAP_SIZE);
+  while(1) {
+    if (has_new_bits(session_virgin_bits) != 2) break;
+  }
+
+  close(sockfd);
+
+  if (likely_buggy && false_negative_reduction) return 0;
+
+  if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
+
+  //give the server a bit more time to gracefully terminate
+  while(1) {
+    int status = kill(child_pid, 0);
+    if ((status != 0) && (errno == ESRCH)) break;
+  }
+
+  return 0;
+}
+
+int send_over_network_cyclonedds()
+{
+  int n;
+  u8 likely_buggy = 0;
+  struct sockaddr_in serv_addr;
+  struct sockaddr_in local_serv_addr;
+
+  //Clean up the server if needed
+  if (cleanup_script) system(cleanup_script);
+
+  //Wait a bit for the server initialization
+  usleep(server_wait_usecs);
+
+  //Clear the response buffer and reset the response buffer size
+  if (response_buf) {
+    ck_free(response_buf);
+    response_buf = NULL;
+    response_buf_size = 0;
+  }
+
+  if (response_bytes) {
+    ck_free(response_bytes);
+    response_bytes = NULL;
+  }
+
+  //Create a TCP/UDP socket
+  int sockfd = -1;
+  if (net_protocol == PRO_TCP)
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  else if (net_protocol == PRO_UDP)
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+  if (sockfd < 0) {
+    PFATAL("Cannot create a socket");
+  }
+
+  //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
+  //if the server is still alive after processing all the requests
+  struct timeval timeout;
+  timeout.tv_sec = 0;
+  timeout.tv_usec = socket_timeout_usecs;
+  setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+
+  memset(&serv_addr, '0', sizeof(serv_addr));
+
+
+
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_port = htons(12345);
+  serv_addr.sin_addr.s_addr = inet_addr(net_ip);
+
+  //This piece of code is only used for targets that send responses to a specific port number
+  //The Kamailio SIP server is an example. After running this code, the intialized sockfd 
+  //will be bound to the given local port
+  if(local_port > 0) {
+    local_serv_addr.sin_family = AF_INET;
+    local_serv_addr.sin_addr.s_addr = INADDR_ANY;
+    local_serv_addr.sin_port = htons(local_port);
+
+    local_serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    if (bind(sockfd, (struct sockaddr*) &local_serv_addr, sizeof(struct sockaddr_in)))  {
+      FATAL("Unable to bind socket on local source port");
+    }
+  }
+
+  if(connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+    //If it cannot connect to the server under test
+    //try it again as the server initial startup time is varied
+    for (n=0; n < 1000; n++) {
+      if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) break;
+      usleep(1000);
+    }
+    if (n== 1000) {
+      close(sockfd);
+      return 1;
+    }
+  }
+
+  //retrieve early server response if needed
+  if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) goto HANDLE_RESPONSES;
+
+  //write the request messages
+  kliter_t(lms) *it;
+  messages_sent = 0;
+
+  for (it = kl_begin(kl_messages); it != kl_end(kl_messages); it = kl_next(it)) {
+    n = net_send(sockfd, timeout, kl_val(it)->mdata, kl_val(it)->msize);
+    messages_sent++;
+
+    //Allocate memory to store new accumulated response buffer size
+    response_bytes = (u32 *) ck_realloc(response_bytes, messages_sent * sizeof(u32));
+
+    //Jump out if something wrong leading to incomplete message sent
+    if (n != kl_val(it)->msize) {
+      goto HANDLE_RESPONSES;
+    }
+
+    //retrieve server response
+    u32 prev_buf_size = response_buf_size;
+    if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) {
+      goto HANDLE_RESPONSES;
+    }
+
+    //Update accumulated response buffer size
+    response_bytes[messages_sent - 1] = response_buf_size;
+
+    //set likely_buggy flag if AFLNet does not receive any feedback from the server
+    //it could be a signal of a potentiall server crash, like the case of CVE-2019-7314
+    if (prev_buf_size == response_buf_size) likely_buggy = 1;
+    else likely_buggy = 0;
+  }
+
+HANDLE_RESPONSES:
+
+  net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size);
+
+  if (messages_sent > 0 && response_bytes != NULL) {
+    response_bytes[messages_sent - 1] = response_buf_size;
+  }
+
+  //wait a bit letting the server to complete its remaining task(s)
+  memset(session_virgin_bits, 255, MAP_SIZE);
+  while(1) {
+    if (has_new_bits(session_virgin_bits) != 2) break;
+  }
+
+  close(sockfd);
+
+  if (likely_buggy && false_negative_reduction) return 0;
+
+  if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
+
+  //give the server a bit more time to gracefully terminate
+  while(1) {
+    int status = kill(child_pid, 0);
+    if ((status != 0) && (errno == ESRCH)) break;
+  }
+
+  return 0;
+}
+
+int send_over_network_opendds()
+{
+  int n;
+  u8 likely_buggy = 0;
+  struct sockaddr_in serv_addr;
+  struct sockaddr_in local_serv_addr;
+
+  //Clean up the server if needed
+  if (cleanup_script) system(cleanup_script);
+
+  //Wait a bit for the server initialization
+  usleep(server_wait_usecs);
+
+  //Clear the response buffer and reset the response buffer size
+  if (response_buf) {
+    ck_free(response_buf);
+    response_buf = NULL;
+    response_buf_size = 0;
+  }
+
+  if (response_bytes) {
+    ck_free(response_bytes);
+    response_bytes = NULL;
+  }
+
+  //Create a TCP/UDP socket
+  int sockfd = -1;
+  if (net_protocol == PRO_TCP)
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  else if (net_protocol == PRO_UDP)
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+  if (sockfd < 0) {
+    PFATAL("Cannot create a socket");
+  }
+
+  //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
+  //if the server is still alive after processing all the requests
+  struct timeval timeout;
+  timeout.tv_sec = 0;
+  timeout.tv_usec = socket_timeout_usecs;
+  setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+
+  memset(&serv_addr, '0', sizeof(serv_addr));
+
+
+
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_port = htons(17900);
   serv_addr.sin_addr.s_addr = inet_addr(net_ip);
 
   //This piece of code is only used for targets that send responses to a specific port number
@@ -2981,7 +3405,6 @@ EXP_ST void init_forkserver(char** argv) {
                            "abort_on_error=1:"
                            "allocator_may_return_null=1:"
                            "msan_track_origins=0", 0);
-    printf("%s\n", target_path);
     execv(target_path, argv);
 
     /* Use a distinctive bitmap signature to tell the parent about execv()
@@ -3175,9 +3598,7 @@ static u8 run_target(char** argv, u32 timeout) {
      logic compiled into the target program, so we will just keep calling
      execve(). There is a bit of code duplication between here and
      init_forkserver(), but c'est la vie. */
-
   if (dumb_mode == 1 || no_forkserver) {
-
     child_pid = fork();
 
     if (child_pid < 0) PFATAL("fork() failed");
@@ -3247,9 +3668,14 @@ static u8 run_target(char** argv, u32 timeout) {
       setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
                              "symbolize=0:"
                              "msan_track_origins=0", 0);
-  
-      execv(target_path, argv);
+      if(dds_mode){
+        execv(target_path, argv);
+      } else{
+        execv(target_path, argv);
+      }
 
+
+      
       /* Use a distinctive bitmap value to tell the parent about execv()
          falling through. */
 
@@ -3259,7 +3685,6 @@ static u8 run_target(char** argv, u32 timeout) {
     }
 
   } else {
-
     s32 res;
 
     /* In non-dumb mode, we have the fork server up and running, so simply
@@ -3280,9 +3705,7 @@ static u8 run_target(char** argv, u32 timeout) {
     }
 
     if (child_pid <= 0) FATAL("Fork server is misbehaving (OOM?)");
-
   }
-
   /* Configure timeout, as requested by user, then wait for child to terminate. */
 
   it.it_value.tv_sec = (timeout / 1000);
@@ -3292,22 +3715,54 @@ static u8 run_target(char** argv, u32 timeout) {
 
   /* The SIGALRM handler simply kills the child_pid and sets child_timed_out. */
 
-  if (dumb_mode == 1 || no_forkserver) {
-    if (use_net) send_over_network();
-    if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
 
-  } else {
-    if (use_net) send_over_network();
-    s32 res;
+  if(dds_mode){
+    if (dumb_mode == 1 || no_forkserver) {
+      if (use_net) {
+        if(strcmp(argv[0], "./Fast-dds")){send_over_network_fastdds();}
+        else if(strcmp(argv[0], "./Eclipse")){send_over_network_cyclonedds();}
+        else if(strcmp(argv[0], "./Open-dds")){send_over_network_opendds();}
+        else{send_over_network();}
+      }
+      // if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
 
-    if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
+    } else {
+      if (use_net) {
+        if(strcmp(argv[0], "./Fast-dds")){send_over_network_fastdds();}
+        else if(strcmp(argv[0], "./Eclipse")){send_over_network_cyclonedds();}
+        else if(strcmp(argv[0], "./Open-dds")){send_over_network_opendds();}
+        else{send_over_network();}
+      }
+      s32 res;
 
-      if (stop_soon) return 0;
-      RPFATAL(res, "Unable to communicate with fork server (OOM?)");
+      if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
+
+        if (stop_soon) return 0;
+        RPFATAL(res, "Unable to communicate with fork server (OOM?)");
+
+      }
 
     }
+  }else{
+    if (dumb_mode == 1 || no_forkserver) {
 
+      if (use_net) send_over_network();
+      // if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
+
+    } else {
+      if (use_net) send_over_network();
+      s32 res;
+
+      if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
+
+        if (stop_soon) return 0;
+        RPFATAL(res, "Unable to communicate with fork server (OOM?)");
+
+      }
+
+    }
   }
+
 
   if (!WIFSTOPPED(status)) child_pid = 0;
 
@@ -5394,9 +5849,8 @@ static void show_init_stats(void) {
    a helper function for fuzz_one(). */
 
 EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
-
+  printf("%s %s %s %s %s\n", argv[0], argv[1], argv[2], argv[3], argv[4]);
   u8 fault;
-  sprintf(argv[2], "%d", rand());
   if (post_handler) {
 
     out_buf = post_handler(out_buf, &len);
@@ -5483,19 +5937,20 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   /* End of AFLNet code */
 
-
-
   fault = run_target(argv, exec_tmout);
+  
+  
 
   //Update fuzz count, no matter whether the generated test is interesting or not
   if (state_aware_mode) update_fuzzs();
 
-  if (stop_soon) return 1;
+  if (stop_soon) { return 1;}
 
   if (fault == FAULT_TMOUT) {
 
     if (subseq_tmouts++ > TMOUT_LIMIT) {
       cur_skipped_paths++;
+
       return 1;
     }
 
@@ -5518,11 +5973,9 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   if (!(stage_cur % stats_update_freq) || stage_cur + 1 == stage_max)
     show_stats();
-
   return 0;
 
 }
-
 
 /* Helper to choose random block len for block operations in fuzz_one().
    Doesn't return zero, provided that max_len is > 0. */
@@ -6160,8 +6613,19 @@ AFLNET_REGIONS_SELECTION:;
     stage_cur_byte = stage_cur >> 3;
 
     FLIP_BIT(out_buf, stage_cur);
-    // sprintf(argv[2], "%d", rand());
-    if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+
+    
+    if(dds_mode){
+      sprintf(dds_seed, "%d", rand());
+      common_fuzz_stuff(opendds_argv, out_buf, len);
+      common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+      if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+    }else{
+       sprintf(argv[2], "%d", rand()%100000);
+      if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    }
+
 
     FLIP_BIT(out_buf, stage_cur);
 
@@ -6253,8 +6717,16 @@ AFLNET_REGIONS_SELECTION:;
 
     FLIP_BIT(out_buf, stage_cur);
     FLIP_BIT(out_buf, stage_cur + 1);
-    // sprintf(argv[2], "%d", rand());
-    if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    if(dds_mode){
+      sprintf(dds_seed, "%d", rand());
+      common_fuzz_stuff(opendds_argv, out_buf, len);
+      common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+      if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+    }else{
+      sprintf(argv[2], "%d", rand()%100000);
+      if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    }
 
     FLIP_BIT(out_buf, stage_cur);
     FLIP_BIT(out_buf, stage_cur + 1);
@@ -6282,8 +6754,16 @@ AFLNET_REGIONS_SELECTION:;
     FLIP_BIT(out_buf, stage_cur + 1);
     FLIP_BIT(out_buf, stage_cur + 2);
     FLIP_BIT(out_buf, stage_cur + 3);
-    // sprintf(argv[2], "%d", rand());
-    if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    if(dds_mode){
+      sprintf(dds_seed, "%d", rand());
+      common_fuzz_stuff(opendds_argv, out_buf, len);
+      common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+      if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+    }else{
+      sprintf(argv[2], "%d", rand()%100000);
+      if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    }
 
     FLIP_BIT(out_buf, stage_cur);
     FLIP_BIT(out_buf, stage_cur + 1);
@@ -6333,9 +6813,15 @@ AFLNET_REGIONS_SELECTION:;
 
     stage_cur_byte = stage_cur;
 
-    out_buf[stage_cur] ^= 0xFF;
-    // sprintf(argv[2], "%d", rand());
-    if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    if(dds_mode){
+      sprintf(dds_seed, "%d", rand());
+      common_fuzz_stuff(opendds_argv, out_buf, len);
+      common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+      if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+    }else{
+      sprintf(argv[2], "%d", rand()%100000);
+      if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    }
 
     /* We also use this stage to pull off a simple trick: we identify
        bytes that seem to have no effect on the current execution path
@@ -6412,8 +6898,15 @@ AFLNET_REGIONS_SELECTION:;
     stage_cur_byte = i;
 
     *(u16*)(out_buf + i) ^= 0xFFFF;
-    // sprintf(argv[2], "%d", rand());
-    if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    if(dds_mode){
+      sprintf(dds_seed, "%d", rand());
+      common_fuzz_stuff(opendds_argv, out_buf, len);
+      common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+      if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+    }else{
+      sprintf(argv[2], "%d", rand()%100000);
+      if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    }
     stage_cur++;
 
     *(u16*)(out_buf + i) ^= 0xFFFF;
@@ -6449,8 +6942,15 @@ AFLNET_REGIONS_SELECTION:;
     stage_cur_byte = i;
 
     *(u32*)(out_buf + i) ^= 0xFFFFFFFF;
-    // sprintf(argv[2], "%d", rand());
-    if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    if(dds_mode){
+      sprintf(dds_seed, "%d", rand());
+      common_fuzz_stuff(opendds_argv, out_buf, len);
+      common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+      if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+    }else{
+      sprintf(argv[2], "%d", rand()%100000);
+      if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+    }
     stage_cur++;
 
     *(u32*)(out_buf + i) ^= 0xFFFFFFFF;
@@ -6505,8 +7005,15 @@ skip_bitflip:
 
         stage_cur_val = j;
         out_buf[i] = orig + j;
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6517,8 +7024,16 @@ skip_bitflip:
 
         stage_cur_val = -j;
         out_buf[i] = orig - j;
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6576,8 +7091,16 @@ skip_bitflip:
 
         stage_cur_val = j;
         *(u16*)(out_buf + i) = orig + j;
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6586,8 +7109,16 @@ skip_bitflip:
 
         stage_cur_val = -j;
         *(u16*)(out_buf + i) = orig - j;
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6601,8 +7132,16 @@ skip_bitflip:
 
         stage_cur_val = j;
         *(u16*)(out_buf + i) = SWAP16(SWAP16(orig) + j);
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6611,8 +7150,16 @@ skip_bitflip:
 
         stage_cur_val = -j;
         *(u16*)(out_buf + i) = SWAP16(SWAP16(orig) - j);
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6669,8 +7216,16 @@ skip_bitflip:
 
         stage_cur_val = j;
         *(u32*)(out_buf + i) = orig + j;
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6679,8 +7234,16 @@ skip_bitflip:
 
         stage_cur_val = -j;
         *(u32*)(out_buf + i) = orig - j;
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6693,8 +7256,16 @@ skip_bitflip:
 
         stage_cur_val = j;
         *(u32*)(out_buf + i) = SWAP32(SWAP32(orig) + j);
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6703,8 +7274,16 @@ skip_bitflip:
 
         stage_cur_val = -j;
         *(u32*)(out_buf + i) = SWAP32(SWAP32(orig) - j);
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6762,8 +7341,16 @@ skip_arith:
 
       stage_cur_val = interesting_8[j];
       out_buf[i] = interesting_8[j];
-      // sprintf(argv[2], "%d", rand());
-      if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+      if(dds_mode){
+        sprintf(dds_seed, "%d", rand());
+        common_fuzz_stuff(opendds_argv, out_buf, len);
+        common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+        if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+      }else{
+        sprintf(argv[2], "%d", rand()%100000);
+        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+      }
 
       out_buf[i] = orig;
       stage_cur++;
@@ -6815,8 +7402,16 @@ skip_arith:
         stage_val_type = STAGE_VAL_LE;
 
         *(u16*)(out_buf + i) = interesting_16[j];
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6829,8 +7424,16 @@ skip_arith:
         stage_val_type = STAGE_VAL_BE;
 
         *(u16*)(out_buf + i) = SWAP16(interesting_16[j]);
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;     
+        } 
         stage_cur++;
 
       } else stage_max--;
@@ -6885,8 +7488,16 @@ skip_arith:
         stage_val_type = STAGE_VAL_LE;
 
         *(u32*)(out_buf + i) = interesting_32[j];
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6899,8 +7510,16 @@ skip_arith:
         stage_val_type = STAGE_VAL_BE;
 
         *(u32*)(out_buf + i) = SWAP32(interesting_32[j]);
-        // sprintf(argv[2], "%d", rand());
-        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        if(dds_mode){
+          sprintf(dds_seed, "%d", rand());
+          common_fuzz_stuff(opendds_argv, out_buf, len);
+          common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+          if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
+
+        }else{
+          sprintf(argv[2], "%d", rand()%100000);
+          if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+        }
         stage_cur++;
 
       } else stage_max--;
@@ -6965,9 +7584,16 @@ skip_interest:
 
       last_len = extras[j].len;
       memcpy(out_buf + i, extras[j].data, last_len);
-      // sprintf(argv[2], "%d", rand());
+      if(dds_mode){
+        sprintf(dds_seed, "%d", rand());
+        common_fuzz_stuff(opendds_argv, out_buf, len);
+        common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+        if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
 
-      if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+      }else{
+        sprintf(argv[2], "%d", rand()%100000);
+        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+      }
 
       stage_cur++;
 
@@ -7010,11 +7636,20 @@ skip_interest:
 
       /* Copy tail */
       memcpy(ex_tmp + i + extras[j].len, out_buf + i, len - i);
-      // sprintf(argv[2], "%d", rand());
-
-      if (common_fuzz_stuff(argv, ex_tmp, len + extras[j].len)) {
-        ck_free(ex_tmp);
-        goto abandon_entry;
+      if(dds_mode){
+        sprintf(dds_seed, "%d", rand());
+        common_fuzz_stuff(opendds_argv, ex_tmp, len + extras[j].len);
+        common_fuzz_stuff(cyclonedds_argv, ex_tmp, len + extras[j].len);
+        if (common_fuzz_stuff(fastdds_argv, ex_tmp, len + extras[j].len)) {
+          ck_free(ex_tmp);
+          goto abandon_entry;
+        }
+      }else{
+        sprintf(argv[2], "%d", rand()%100000);
+        if (common_fuzz_stuff(argv, ex_tmp, len + extras[j].len)) {
+          ck_free(ex_tmp);
+          goto abandon_entry;
+        }
       }
 
       stage_cur++;
@@ -7067,9 +7702,16 @@ skip_user_extras:
 
       last_len = a_extras[j].len;
       memcpy(out_buf + i, a_extras[j].data, last_len);
-      // sprintf(argv[2], "%d", rand());
+      if(dds_mode){
+        sprintf(dds_seed, "%d", rand());
+        common_fuzz_stuff(opendds_argv, out_buf, len);
+        common_fuzz_stuff(cyclonedds_argv, out_buf, len);
+        if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
 
-      if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+      }else{
+        sprintf(argv[2], "%d", rand()%100000);
+        if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+      }
 
       stage_cur++;
 
@@ -7594,10 +8236,18 @@ havoc_stage:
       }
 
     }
-    // sprintf(argv[2], "%d", rand());
+      if(dds_mode){
+        sprintf(dds_seed, "%d", rand());
+        common_fuzz_stuff(opendds_argv, out_buf, temp_len);
+        common_fuzz_stuff(cyclonedds_argv, out_buf, temp_len);
+        if (common_fuzz_stuff(fastdds_argv, out_buf, temp_len))
+          goto abandon_entry;
 
-    if (common_fuzz_stuff(argv, out_buf, temp_len))
-      goto abandon_entry;
+      }else{
+        sprintf(argv[2], "%d", rand()%100000);
+        if (common_fuzz_stuff(argv, out_buf, temp_len))
+          goto abandon_entry;
+      }
 
     /* out_buf might have been mangled a bit, so let's restore it to its
        original size and shape. */
@@ -8245,21 +8895,49 @@ static void usage(u8* argv0) {
 
 }
 
-void diff_usage() {
-  fastdds = (u8*)malloc(100);
-  cyclonedds = (u8*)malloc(100);
-  opendds = (u8*)malloc(100);
-  printf("This differ mode for DDS program\n");
-  printf("Please provide each DDS program:\n");
-  printf("Fast DDS: ");
-  scanf("%s",fastdds);
-  printf("Cyclone DDS: ");
-  scanf("%s", cyclonedds);
-  printf("OpenDDS: ");
-  scanf("%s", opendds);
+void dds_usage() {
+  dds_seed = malloc(20);
+  sprintf(dds_seed, "%d", rand());
 
-  exit(1);
+  fastdds_argv = malloc(6 * sizeof(char*));
+  cyclonedds_argv = malloc(6 * sizeof(char*));
+  opendds_argv = malloc(6 * sizeof(char*));
 
+  fastdds_argv[0] = malloc(strlen("./Fast-dds")+1);
+  cyclonedds_argv[0] = malloc(strlen("./Eclipse")+1);
+  opendds_argv[0] = malloc(strlen("./Open-dds")+1);
+  strcpy(fastdds_argv[0], "./Fast-dds");
+  strcpy(cyclonedds_argv[0], "./Eclipse");
+  strcpy(opendds_argv[0], "./Open-dds");
+
+  fastdds_argv[1] = malloc(strlen("-s")+1);
+  cyclonedds_argv[1] = malloc(strlen("-s")+1);
+  opendds_argv[1] = malloc(strlen("-s")+1);
+  strcpy(fastdds_argv[1], "-s");
+  strcpy(cyclonedds_argv[1], "-s");
+  strcpy(opendds_argv[1], "-s");
+
+  fastdds_argv[2] = dds_seed;
+  cyclonedds_argv[2] = dds_seed;
+  opendds_argv[2] = dds_seed;
+
+  fastdds_argv[3] = malloc(strlen("-m")+1);
+  cyclonedds_argv[3] = malloc(strlen("-m")+1);
+  opendds_argv[3] = malloc(strlen("-m")+1);
+  strcpy(fastdds_argv[3], "-m");
+  strcpy(cyclonedds_argv[3], "-m");
+  strcpy(opendds_argv[3], "-m");
+
+  fastdds_argv[4] = malloc(strlen("topo")+1);
+  cyclonedds_argv[4] = malloc(strlen("topo")+1);
+  opendds_argv[4] = malloc(strlen("topo")+1);
+  strcpy(fastdds_argv[4], "topo");
+  strcpy(cyclonedds_argv[4], "topo");
+  strcpy(opendds_argv[4], "topo");
+
+  fastdds_argv[5] = NULL;
+  cyclonedds_argv[5] = NULL;
+  opendds_argv[5] = NULL;
 }
 
 /* Prepare output directories and fds. */
@@ -9278,8 +9956,8 @@ int main(int argc, char** argv) {
         break;
       
       case 'J': /* use IPSM */
-        printf("Differ MODE!\n");
-        diff_usage();
+        printf("DDS MODE!\n");
+        dds_usage();
         dds_mode = 1;
         break;
       default:
