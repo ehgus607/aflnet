@@ -1268,6 +1268,7 @@ HANDLE_RESPONSES:
   while(1) {
     int status = kill(child_pid, 0);
     if ((status != 0) && (errno == ESRCH)) break;
+    if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
   }
 
   return 0;
@@ -1409,6 +1410,7 @@ HANDLE_RESPONSES:
   while(1) {
     int status = kill(child_pid, 0);
     if ((status != 0) && (errno == ESRCH)) break;
+    if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
   }
 
   return 0;
@@ -1550,6 +1552,7 @@ HANDLE_RESPONSES:
   while(1) {
     int status = kill(child_pid, 0);
     if ((status != 0) && (errno == ESRCH)) break;
+    if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
   }
 
   return 0;
@@ -3668,11 +3671,9 @@ static u8 run_target(char** argv, u32 timeout) {
       setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
                              "symbolize=0:"
                              "msan_track_origins=0", 0);
-      if(dds_mode){
-        execv(target_path, argv);
-      } else{
-        execv(target_path, argv);
-      }
+      printf("%s %s %s %s %s\n", argv[0], argv[1], argv[2], argv[3], argv[4]);
+      execv(argv[0], argv);
+
 
 
       
@@ -5849,7 +5850,6 @@ static void show_init_stats(void) {
    a helper function for fuzz_one(). */
 
 EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
-  printf("%s %s %s %s %s\n", argv[0], argv[1], argv[2], argv[3], argv[4]);
   u8 fault;
   if (post_handler) {
 
