@@ -6617,6 +6617,7 @@ AFLNET_REGIONS_SELECTION:;
     
     if(dds_mode){
       sprintf(dds_seed, "%d", rand());
+      dds_differ();
       common_fuzz_stuff(opendds_argv, out_buf, len);
       common_fuzz_stuff(cyclonedds_argv, out_buf, len);
       if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -6719,6 +6720,7 @@ AFLNET_REGIONS_SELECTION:;
     FLIP_BIT(out_buf, stage_cur + 1);
     if(dds_mode){
       sprintf(dds_seed, "%d", rand());
+      dds_differ();
       common_fuzz_stuff(opendds_argv, out_buf, len);
       common_fuzz_stuff(cyclonedds_argv, out_buf, len);
       if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -6756,6 +6758,7 @@ AFLNET_REGIONS_SELECTION:;
     FLIP_BIT(out_buf, stage_cur + 3);
     if(dds_mode){
       sprintf(dds_seed, "%d", rand());
+      dds_differ();
       common_fuzz_stuff(opendds_argv, out_buf, len);
       common_fuzz_stuff(cyclonedds_argv, out_buf, len);
       if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -6815,6 +6818,7 @@ AFLNET_REGIONS_SELECTION:;
 
     if(dds_mode){
       sprintf(dds_seed, "%d", rand());
+      dds_differ();
       common_fuzz_stuff(opendds_argv, out_buf, len);
       common_fuzz_stuff(cyclonedds_argv, out_buf, len);
       if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -6900,6 +6904,7 @@ AFLNET_REGIONS_SELECTION:;
     *(u16*)(out_buf + i) ^= 0xFFFF;
     if(dds_mode){
       sprintf(dds_seed, "%d", rand());
+      dds_differ();
       common_fuzz_stuff(opendds_argv, out_buf, len);
       common_fuzz_stuff(cyclonedds_argv, out_buf, len);
       if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -6944,6 +6949,7 @@ AFLNET_REGIONS_SELECTION:;
     *(u32*)(out_buf + i) ^= 0xFFFFFFFF;
     if(dds_mode){
       sprintf(dds_seed, "%d", rand());
+      dds_differ();
       common_fuzz_stuff(opendds_argv, out_buf, len);
       common_fuzz_stuff(cyclonedds_argv, out_buf, len);
       if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7007,6 +7013,7 @@ skip_bitflip:
         out_buf[i] = orig + j;
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7026,6 +7033,7 @@ skip_bitflip:
         out_buf[i] = orig - j;
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7093,6 +7101,7 @@ skip_bitflip:
         *(u16*)(out_buf + i) = orig + j;
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7111,6 +7120,7 @@ skip_bitflip:
         *(u16*)(out_buf + i) = orig - j;
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7134,6 +7144,7 @@ skip_bitflip:
         *(u16*)(out_buf + i) = SWAP16(SWAP16(orig) + j);
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7152,6 +7163,7 @@ skip_bitflip:
         *(u16*)(out_buf + i) = SWAP16(SWAP16(orig) - j);
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7236,6 +7248,7 @@ skip_bitflip:
         *(u32*)(out_buf + i) = orig - j;
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7258,6 +7271,7 @@ skip_bitflip:
         *(u32*)(out_buf + i) = SWAP32(SWAP32(orig) + j);
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7276,6 +7290,7 @@ skip_bitflip:
         *(u32*)(out_buf + i) = SWAP32(SWAP32(orig) - j);
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7343,6 +7358,7 @@ skip_arith:
       out_buf[i] = interesting_8[j];
       if(dds_mode){
         sprintf(dds_seed, "%d", rand());
+        dds_differ();
         common_fuzz_stuff(opendds_argv, out_buf, len);
         common_fuzz_stuff(cyclonedds_argv, out_buf, len);
         if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7404,6 +7420,7 @@ skip_arith:
         *(u16*)(out_buf + i) = interesting_16[j];
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7426,6 +7443,7 @@ skip_arith:
         *(u16*)(out_buf + i) = SWAP16(interesting_16[j]);
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7490,6 +7508,7 @@ skip_arith:
         *(u32*)(out_buf + i) = interesting_32[j];
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7512,6 +7531,7 @@ skip_arith:
         *(u32*)(out_buf + i) = SWAP32(interesting_32[j]);
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7586,6 +7606,7 @@ skip_interest:
       memcpy(out_buf + i, extras[j].data, last_len);
       if(dds_mode){
         sprintf(dds_seed, "%d", rand());
+        dds_differ();
         common_fuzz_stuff(opendds_argv, out_buf, len);
         common_fuzz_stuff(cyclonedds_argv, out_buf, len);
         if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -7638,6 +7659,7 @@ skip_interest:
       memcpy(ex_tmp + i + extras[j].len, out_buf + i, len - i);
       if(dds_mode){
         sprintf(dds_seed, "%d", rand());
+        dds_differ();
         common_fuzz_stuff(opendds_argv, ex_tmp, len + extras[j].len);
         common_fuzz_stuff(cyclonedds_argv, ex_tmp, len + extras[j].len);
         if (common_fuzz_stuff(fastdds_argv, ex_tmp, len + extras[j].len)) {
@@ -7704,6 +7726,7 @@ skip_user_extras:
       memcpy(out_buf + i, a_extras[j].data, last_len);
       if(dds_mode){
         sprintf(dds_seed, "%d", rand());
+        dds_differ();
         common_fuzz_stuff(opendds_argv, out_buf, len);
         common_fuzz_stuff(cyclonedds_argv, out_buf, len);
         if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -8238,6 +8261,7 @@ havoc_stage:
     }
       if(dds_mode){
         sprintf(dds_seed, "%d", rand());
+        dds_differ();
         common_fuzz_stuff(opendds_argv, out_buf, temp_len);
         common_fuzz_stuff(cyclonedds_argv, out_buf, temp_len);
         if (common_fuzz_stuff(fastdds_argv, out_buf, temp_len))
@@ -8939,6 +8963,12 @@ void dds_usage() {
   cyclonedds_argv[5] = NULL;
   opendds_argv[5] = NULL;
 }
+
+void dds_differ(){
+
+}
+
+
 
 /* Prepare output directories and fds. */
 
