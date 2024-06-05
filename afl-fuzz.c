@@ -7230,6 +7230,7 @@ skip_bitflip:
         *(u32*)(out_buf + i) = orig + j;
         if(dds_mode){
           sprintf(dds_seed, "%d", rand());
+          dds_differ();
           common_fuzz_stuff(opendds_argv, out_buf, len);
           common_fuzz_stuff(cyclonedds_argv, out_buf, len);
           if(common_fuzz_stuff(fastdds_argv, out_buf, len)) goto abandon_entry;
@@ -8922,6 +8923,7 @@ static void usage(u8* argv0) {
 void dds_usage() {
   dds_seed = malloc(20);
   sprintf(dds_seed, "%d", rand());
+  dds_differ();
 
   fastdds_argv = malloc(6 * sizeof(char*));
   cyclonedds_argv = malloc(6 * sizeof(char*));
@@ -8965,6 +8967,49 @@ void dds_usage() {
 }
 
 void dds_differ(){
+    pid_t pid = fork();
+
+    if (pid == -1) {
+        perror("fork failed");
+        return 1;
+    }
+
+    if (pid == 0) {
+        // 자식 프로세스에서 파이썬 스크립트 실행
+        char *args[] = {"python3", "diff.py", dds_seed, NULL};
+
+        // 표준 출력과 표준 오류를 /dev/null로 리다이렉트
+        int fd_null = open("/dev/null", O_WRONLY);
+        if (fd_null == -1) {
+            perror("open /dev/null failed");
+            exit(1);
+        }
+        dup2(fd_null, STDOUT_FILENO);
+        dup2(fd_null, STDERR_FILENO);
+        close(fd_null);
+
+        // execvp를 사용하여 파이썬 스크립트 실행
+        if (execvp("python3", args) == -1) {
+            perror("execvp failed");
+            exit(1);
+        }
+    } else {
+        // 부모 프로세스는 자식 프로세스의 종료를 기다림
+        int status;
+        pid_t child_pid = waitpid(pid, &status, 0);
+        if (child_pid == -1) {
+            perror("waitpid failed");
+            return 1;
+        }
+
+        if (WIFEXITED(status)) {
+            printf("Child exited with status %d\n", WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+            printf("Child terminated by signal %d\n", WTERMSIG(status));
+        } else {
+            printf("Child did not terminate normally\n");
+        }
+    }
 
 }
 
